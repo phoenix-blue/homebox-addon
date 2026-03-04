@@ -40,6 +40,44 @@ When `true`, the add-on performs a startup connectivity check to the Home Assist
 
 Default: `true`
 
+### Option: `homebox_sync_enabled`
+
+Enables periodic sync of one Homebox item to one Home Assistant entity.
+
+Default: `false`
+
+### Option: `homebox_url`
+
+Base URL of Homebox API. For this add-on on the same host, `http://127.0.0.1:7745` usually works.
+
+Default: `http://127.0.0.1:7745`
+
+### Option: `homebox_api_token`
+
+Homebox API bearer token used to fetch the selected item.
+
+### Option: `homebox_item_id`
+
+The Homebox item UUID to sync to Home Assistant.
+
+### Option: `ha_target_entity_id`
+
+Entity ID in Home Assistant that will be updated by the sync process (for example `sensor.homebox_selected_item`).
+
+Default: `sensor.homebox_selected_item`
+
+### Option: `homebox_sync_interval_seconds`
+
+Sync interval in seconds.
+
+Default: `60`
+
+## Homebox → Home Assistant sync (MVP)
+
+This add-on can sync one selected Homebox item to one Home Assistant entity using the Supervisor token. The entity state is set to the item name, and attributes include fields like price, currency, location and item URL.
+
+This is an MVP implementation and does not add a Home Assistant device picker inside the Homebox UI yet.
+
 ## Data Storage
 
 All Homebox data (SQLite database, uploaded images and attachments) is stored in the add-on's persistent `/data` directory. This directory is included in Home Assistant backups automatically.

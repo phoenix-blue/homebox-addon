@@ -54,5 +54,92 @@ if bashio::config.true 'ha_api_startup_check'; then
        fi
 fi
 
+start_homebox_item_sync() {
+	if ! bashio::config.true 'homebox_sync_enabled'; then
+		return
+	fi
+
+	if [ -z "${SUPERVISOR_TOKEN:-}" ]; then
+		bashio::log.warning "Homebox sync enabled but SUPERVISOR_TOKEN is not available"
+		return
+	fi
+
+	if ! command -v jq >/dev/null 2>&1; then
+		bashio::log.warning "Homebox sync requires jq, but jq was not found"
+		return
+	fi
+
+	HOMEBOX_SYNC_URL="$(bashio::config 'homebox_url')"
+	HOMEBOX_SYNC_TOKEN="$(bashio::config 'homebox_api_token')"
+	HOMEBOX_SYNC_ITEM_ID="$(bashio::config 'homebox_item_id')"
+	HOMEBOX_SYNC_ENTITY_ID="$(bashio::config 'ha_target_entity_id')"
+	HOMEBOX_SYNC_INTERVAL="$(bashio::config 'homebox_sync_interval_seconds')"
+
+	if [ -z "${HOMEBOX_SYNC_TOKEN}" ] || [ -z "${HOMEBOX_SYNC_ITEM_ID}" ]; then
+		bashio::log.warning "Homebox sync enabled but homebox_api_token or homebox_item_id is empty"
+		return
+	fi
+
+	if [ -z "${HOMEBOX_SYNC_ENTITY_ID}" ]; then
+		bashio::log.warning "Homebox sync enabled but ha_target_entity_id is empty"
+		return
+	fi
+
+	bashio::log.info "Starting Homebox->HA item sync to ${HOMEBOX_SYNC_ENTITY_ID} (interval ${HOMEBOX_SYNC_INTERVAL}s)"
+
+	(
+		SYNC_OK_LOGGED="false"
+		while true; do
+			ITEM_ENDPOINT="${HOMEBOX_SYNC_URL%/}/api/v1/items/${HOMEBOX_SYNC_ITEM_ID}"
+			ITEM_JSON="$(curl -fsS -H "Authorization: Bearer ${HOMEBOX_SYNC_TOKEN}" "${ITEM_ENDPOINT}" 2>/dev/null || true)"
+
+			if [ -z "${ITEM_JSON}" ]; then
+				bashio::log.warning "Homebox sync: failed to fetch item ${HOMEBOX_SYNC_ITEM_ID}"
+				sleep "${HOMEBOX_SYNC_INTERVAL}"
+				continue
+			fi
+
+			if ! echo "${ITEM_JSON}" | jq . >/dev/null 2>&1; then
+				bashio::log.warning "Homebox sync: received invalid JSON from Homebox API"
+				sleep "${HOMEBOX_SYNC_INTERVAL}"
+				continue
+			fi
+
+			STATE_VALUE="$(echo "${ITEM_JSON}" | jq -r '.name // .label // "homebox_item"')"
+			ATTRS_JSON="$(echo "${ITEM_JSON}" | jq -c --arg item_id "${HOMEBOX_SYNC_ITEM_ID}" --arg item_url "${HOMEBOX_SYNC_URL%/}/item/${HOMEBOX_SYNC_ITEM_ID}" '{
+				homebox_item_id: (.id // $item_id),
+				homebox_name: (.name // null),
+				homebox_price: (.purchase_price // .purchasePrice // .price // .value // null),
+				homebox_currency: (.purchase_currency // .purchaseCurrency // .currency // null),
+				homebox_location: (.location.name // .location // null),
+				homebox_serial: (.serial // .serial_number // null),
+				homebox_updated_at: (.updated_at // .updatedAt // null),
+				homebox_url: $item_url
+			}')"
+
+			PAYLOAD="$(jq -cn --arg state "${STATE_VALUE}" --argjson attributes "${ATTRS_JSON}" '{state: $state, attributes: $attributes}')"
+
+			HA_STATUS="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+				-H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+				-H "Content-Type: application/json" \
+				-d "${PAYLOAD}" \
+				"http://supervisor/core/api/states/${HOMEBOX_SYNC_ENTITY_ID}" || true)"
+
+			if [ "${HA_STATUS}" = "200" ] || [ "${HA_STATUS}" = "201" ]; then
+				if [ "${SYNC_OK_LOGGED}" = "false" ]; then
+					bashio::log.info "Homebox sync succeeded for ${HOMEBOX_SYNC_ENTITY_ID}"
+					SYNC_OK_LOGGED="true"
+				fi
+			else
+				bashio::log.warning "Homebox sync failed for ${HOMEBOX_SYNC_ENTITY_ID} (HTTP ${HA_STATUS})"
+			fi
+
+			sleep "${HOMEBOX_SYNC_INTERVAL}"
+		done
+	) &
+}
+
+start_homebox_item_sync
+
 bashio::log.info "Starting Homebox..."
 exec /usr/bin/homebox

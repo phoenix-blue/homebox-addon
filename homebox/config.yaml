@@ -1,6 +1,6 @@
 ---
 name: Homebox
-version: "0.23.1.1-dev1"
+version: "0.23.1.2-dev1"
 slug: homebox
 description: Inventory management — track and manage your belongings
 url: https://github.com/Crafter-Y/homebox-addon
@@ -21,11 +21,23 @@ options:
   allow_registration: true
   max_upload_size: 10
   ha_api_startup_check: true
+  homebox_sync_enabled: false
+  homebox_url: "http://127.0.0.1:7745"
+  homebox_api_token: ""
+  homebox_item_id: ""
+  ha_target_entity_id: "sensor.homebox_selected_item"
+  homebox_sync_interval_seconds: 60
 schema:
   log_level: list(trace|debug|info|warn|error|fatal|panic)
   allow_registration: bool
   max_upload_size: int(1,100)
   ha_api_startup_check: bool
+  homebox_sync_enabled: bool
+  homebox_url: str
+  homebox_api_token: password?
+  homebox_item_id: str?
+  ha_target_entity_id: str
+  homebox_sync_interval_seconds: int(10,3600)
 backup_exclude:
   - .data/*.db-shm
   - .data/*.db-wal

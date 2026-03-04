@@ -7,6 +7,8 @@ FROM ghcr.io/sysadminsmedia/homebox:0.23.1 AS homebox-src
 # Stage 2: Build the HA addon on top of the official HA base image
 FROM ${BUILD_FROM}
 
+RUN apk add --no-cache jq
+
 # Copy the Homebox binary from the official image
 COPY --from=homebox-src /app/api /usr/bin/homebox
 
