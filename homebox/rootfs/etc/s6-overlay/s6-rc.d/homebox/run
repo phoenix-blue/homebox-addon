@@ -71,12 +71,19 @@ start_homebox_item_sync() {
 
 	HOMEBOX_SYNC_URL="$(bashio::config 'homebox_url')"
 	HOMEBOX_SYNC_TOKEN="$(bashio::config 'homebox_api_token')"
+	HOMEBOX_SYNC_USERNAME="$(bashio::config 'homebox_username')"
+	HOMEBOX_SYNC_PASSWORD="$(bashio::config 'homebox_password')"
 	HOMEBOX_SYNC_ITEM_ID="$(bashio::config 'homebox_item_id')"
 	HOMEBOX_SYNC_ENTITY_ID="$(bashio::config 'ha_target_entity_id')"
 	HOMEBOX_SYNC_INTERVAL="$(bashio::config 'homebox_sync_interval_seconds')"
 
-	if [ -z "${HOMEBOX_SYNC_TOKEN}" ] || [ -z "${HOMEBOX_SYNC_ITEM_ID}" ]; then
-		bashio::log.warning "Homebox sync enabled but homebox_api_token or homebox_item_id is empty"
+	if [ -z "${HOMEBOX_SYNC_ITEM_ID}" ]; then
+		bashio::log.warning "Homebox sync enabled but homebox_item_id is empty"
+		return
+	fi
+
+	if [ -z "${HOMEBOX_SYNC_TOKEN}" ] && { [ -z "${HOMEBOX_SYNC_USERNAME}" ] || [ -z "${HOMEBOX_SYNC_PASSWORD}" ]; }; then
+		bashio::log.warning "Homebox sync enabled but no auth configured (set homebox_api_token or username/password)"
 		return
 	fi
 
@@ -88,13 +95,62 @@ start_homebox_item_sync() {
 	bashio::log.info "Starting Homebox->HA item sync to ${HOMEBOX_SYNC_ENTITY_ID} (interval ${HOMEBOX_SYNC_INTERVAL}s)"
 
 	(
-		SYNC_OK_LOGGED="false"
-		while true; do
-			ITEM_ENDPOINT="${HOMEBOX_SYNC_URL%/}/api/v1/items/${HOMEBOX_SYNC_ITEM_ID}"
-			ITEM_JSON="$(curl -fsS -H "Authorization: Bearer ${HOMEBOX_SYNC_TOKEN}" "${ITEM_ENDPOINT}" 2>/dev/null || true)"
+		resolve_homebox_token() {
+			if [ -n "${HOMEBOX_SYNC_TOKEN}" ]; then
+				printf '%s' "${HOMEBOX_SYNC_TOKEN}"
+				return 0
+			fi
 
-			if [ -z "${ITEM_JSON}" ]; then
-				bashio::log.warning "Homebox sync: failed to fetch item ${HOMEBOX_SYNC_ITEM_ID}"
+			if [ -z "${HOMEBOX_SYNC_USERNAME}" ] || [ -z "${HOMEBOX_SYNC_PASSWORD}" ]; then
+				return 1
+			fi
+
+			for AUTH_PATH in "/api/v1/users/login" "/api/v1/auth/login" "/api/v1/auth/token"; do
+				for USER_FIELD in "username" "email"; do
+					LOGIN_PAYLOAD="$(jq -cn --arg uf "${USER_FIELD}" --arg u "${HOMEBOX_SYNC_USERNAME}" --arg p "${HOMEBOX_SYNC_PASSWORD}" '{($uf): $u, password: $p}')"
+					LOGIN_RESPONSE="$(curl -sS -X POST -H "Content-Type: application/json" -d "${LOGIN_PAYLOAD}" "${HOMEBOX_SYNC_URL%/}${AUTH_PATH}" 2>/dev/null || true)"
+
+					if [ -z "${LOGIN_RESPONSE}" ] || ! echo "${LOGIN_RESPONSE}" | jq . >/dev/null 2>&1; then
+						continue
+					fi
+
+					LOGIN_TOKEN="$(echo "${LOGIN_RESPONSE}" | jq -r '.token // .access_token // .accessToken // .data.token // .data.access_token // .data.accessToken // empty')"
+					if [ -n "${LOGIN_TOKEN}" ]; then
+						printf '%s' "${LOGIN_TOKEN}"
+						return 0
+					fi
+				done
+			done
+
+			return 1
+		}
+
+		SYNC_OK_LOGGED="false"
+		AUTH_OK_LOGGED="false"
+		while true; do
+			ACTIVE_HOMEBOX_TOKEN="$(resolve_homebox_token)"
+			if [ -z "${ACTIVE_HOMEBOX_TOKEN}" ]; then
+				bashio::log.warning "Homebox sync: could not obtain auth token from configured settings"
+				sleep "${HOMEBOX_SYNC_INTERVAL}"
+				continue
+			fi
+
+			if [ "${AUTH_OK_LOGGED}" = "false" ]; then
+				if [ -n "${HOMEBOX_SYNC_TOKEN}" ]; then
+					bashio::log.info "Homebox sync authentication using configured API token"
+				else
+					bashio::log.info "Homebox sync authentication using username/password login"
+				fi
+				AUTH_OK_LOGGED="true"
+			fi
+
+			ITEM_ENDPOINT="${HOMEBOX_SYNC_URL%/}/api/v1/items/${HOMEBOX_SYNC_ITEM_ID}"
+			ITEM_RESPONSE="$(curl -sS -w "\n%{http_code}" -H "Authorization: Bearer ${ACTIVE_HOMEBOX_TOKEN}" "${ITEM_ENDPOINT}" 2>/dev/null || true)"
+			ITEM_HTTP_CODE="$(printf '%s' "${ITEM_RESPONSE}" | tail -n 1)"
+			ITEM_JSON="$(printf '%s' "${ITEM_RESPONSE}" | sed '$d')"
+
+			if [ "${ITEM_HTTP_CODE}" != "200" ] || [ -z "${ITEM_JSON}" ]; then
+				bashio::log.warning "Homebox sync: failed to fetch item ${HOMEBOX_SYNC_ITEM_ID} (HTTP ${ITEM_HTTP_CODE})"
 				sleep "${HOMEBOX_SYNC_INTERVAL}"
 				continue
 			fi

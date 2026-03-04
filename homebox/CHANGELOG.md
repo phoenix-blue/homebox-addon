@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.1.3-dev1
+
+- Add automatic Homebox API authentication via username/password fallback
+- Keep manual token support as first authentication method
+- Improve sync logging for Homebox API HTTP status and auth mode
+
 ## 0.23.1.2-dev1
 
 - Add Homebox item to Home Assistant entity sync (MVP, no MQTT)

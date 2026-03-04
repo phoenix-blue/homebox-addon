@@ -56,6 +56,16 @@ Default: `http://127.0.0.1:7745`
 
 Homebox API bearer token used to fetch the selected item.
 
+If this is empty, the add-on can try login with `homebox_username` and `homebox_password`.
+
+### Option: `homebox_username`
+
+Homebox username (or email) used to obtain an API token automatically when no manual token is set.
+
+### Option: `homebox_password`
+
+Homebox password used to obtain an API token automatically when no manual token is set.
+
 ### Option: `homebox_item_id`
 
 The Homebox item UUID to sync to Home Assistant.
@@ -75,6 +85,10 @@ Default: `60`
 ## Homebox → Home Assistant sync (MVP)
 
 This add-on can sync one selected Homebox item to one Home Assistant entity using the Supervisor token. The entity state is set to the item name, and attributes include fields like price, currency, location and item URL.
+
+Authentication priority for Homebox API:
+1. `homebox_api_token` when provided
+2. automatic login using `homebox_username` + `homebox_password`
 
 This is an MVP implementation and does not add a Home Assistant device picker inside the Homebox UI yet.
 
